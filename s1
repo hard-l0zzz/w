@@ -204,3 +204,203 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+from sqlalchemy.ext.automap import automap_base
+from database import engine
+
+Base = automap_base()
+Base.prepare(engine,reflect=True)
+
+Department = Base.classes.departments
+
+
+
+АПИ:
+
+from fastapi import FastAPI,HTTPException,Header,Depends
+
+import datetime
+
+import jwt
+
+from pydantic import BaseModel
+
+  
+
+SECRET_KEY ="secret"
+
+users={"admin":"password"}
+
+  
+  
+
+app = FastAPI()
+
+  
+
+documents = [
+
+{"id": 1,"title": "Документ1","date_created": "2024-05-01 14:44:44","date_updated": "2024-05-01 14:44:44","category": "Документация","has_comments": "true"},
+
+{"id": 2,"title": "Документ2","date_created": "2024-05-01 14:44:44","date_updated": "2024-05-01 14:44:44","category": "Фэнтэзи","has_comments": "false"}
+
+]
+
+  
+  
+
+comments = [
+
+    {"id": 1, "document_id": 1, "text": "Hello world", "date_created": "2024-05-01 14:44:44", "date_updated": "2024-05-01 14:44:44", "author": {"name": "Петров Петр", "position": "Администратор"}},
+
+    {"id": 2, "document_id": 1, "text": "Another comment", "date_created": "2024-05-02 09:00:00", "date_updated": "2024-05-02 09:00:00", "author": {"name": "Иванова Ирина", "position": "Менеджер"}}
+
+]
+
+  
+
+def create_token(username:str):
+
+    payload={
+
+        "sub":username,
+
+        "exp":datetime.datetime.now()+datetime.timedelta(hours=1)
+
+    }
+
+    return jwt.encode(payload,SECRET_KEY,algorithm="HS256")
+
+  
+  
+
+@app.post("/api/v1/SignIn")
+
+def login(data:dict):
+
+    username = data.get("username")
+
+    password = data.get("password")
+
+  
+
+    if users.get(username)!=password:
+
+        raise HTTPException(status_code=403,detail="Неверные данные")
+
+  
+
+    token = create_token(username)
+
+    return {"access_token":token}
+
+  
+  
+
+def verify_token(authorization:str=Header(None)):
+
+    print(authorization)
+
+    if not authorization:
+
+        raise HTTPException(status_code=403,detail="Токен обязателен")
+
+    try:
+
+        token = authorization.split(" ")[1]
+
+        payload = jwt.decode(token,SECRET_KEY,algorithms=["HS256"])
+
+        return payload["sub"]
+
+    except jwt.ExpiredSignatureError:
+
+        raise HTTPException(status_code=403,detail="Истёк")
+
+    except jwt.InvalidTokenError:
+
+        raise HTTPException(status_code=403,detail="Неверный токен")
+
+  
+
+@app.get('/api/v1/Documents')
+
+def read_root(user:str=Depends(verify_token)):
+
+    return documents
+
+  
+  
+
+@app.get("/api/v1/Document/{document_id}/Comments")
+
+def get_comments(document_id: int, user:str = Depends(verify_token)):
+
+    # Ищем комментарии по document_id
+
+    doc_comments = [comment for comment in comments if comment["document_id"] == document_id]
+
+    if not doc_comments:
+
+        raise HTTPException(status_code=404, detail="Комментарии не найдены")
+
+    return doc_comments
+
+  
+
+class CommentCreate(BaseModel):
+
+    text: str
+
+    author_name: str
+
+    author_position: str
+
+  
+
+# 📌 Добавить комментарий к документу
+
+@app.post("/api/v1/Document/{document_id}/Comment")
+
+def add_comment(document_id: int, comment: CommentCreate):
+
+    # Проверяем, существует ли документ
+
+    document = next((doc for doc in documents if doc["id"] == document_id), None)
+
+    if not document:
+
+        raise HTTPException(status_code=404, detail="Документ не найден")
+
+  
+
+    # Создаём нового автора
+
+    new_author = {"name": comment.author_name, "position": comment.author_position}
+
+  
+
+    # Создаём новый комментарий
+
+    new_comment = {
+
+        "id": len(comments) + 1,
+
+        "document_id": document_id,
+
+        "text": comment.text,
+
+        "date_created": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+
+        "date_updated": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+
+        "author": new_author
+
+    }
+
+  
+
+    comments.append(new_comment)
+
+    return new_comment
