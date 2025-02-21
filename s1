@@ -1,0 +1,189 @@
+создание таблиц в бд
+
+CREATE TABLE departments(
+DepartmentId INT PRIMARY KEY AUTO_INCREMENT,
+Name VARCHAR(150) NOT NULL,
+Description TEXT
+);
+
+CREATE TABLE positions(
+PositionId INT PRIMARY KEY AUTO_INCREMENT,
+Title VARCHAR(150) NOT NULL
+);
+
+CREATE TABLE employees(
+EmployeeId INT PRIMARY KEY AUTO_INCREMENT,
+FullName VARCHAR(100) NOT NULL,
+DepartmentId INT,
+PositionId INT,
+FOREIGN KEY (DepartmentId) REFERENCES departments(DepartmentId) ON DELETE SET NULL,
+FOREIGN KEY (PositionId) REFERENCES positions(PositionId) ON DELETE SET NULL
+);
+
+CREATE TABLE employees_contacts(
+ContactId INT PRIMARY KEY AUTO_INCREMENT,
+EmployeeId INT NOT NULL,
+MobilePhone VARCHAR(20),
+WorkPhone VARCHAR(20),
+Email VARCHAR(50),
+OfficeNUmber VARCHAR(10),
+FOREIGN KEY (EmployeId) REFERENCES employees(EmployeeId) ON DELETE CASCADE
+);
+
+CREATE TABLE employees_personal_info(
+PersonalInfoId INT PRIMARY KEY AUTO_INCREMENT,
+EmployeeId INT NOT NULL,
+BirthDate DATE,
+AdditionalInfo TEXT,
+FOREIGN KEY (EmployeId) REFERENCES employees(EmployeeId) ON DELETE CASCADE
+);
+
+CREATE TABLE events (
+    EventId INT PRIMARY KEY AUTO_INCREMENT,
+    EventType ENUM('Meeting', 'Conference', 'Training', 'Other') NOT NULL,
+    Title VARCHAR(255) NOT NULL,
+    Description TEXT,
+    StartDate DATETIME NOT NULL,
+    EndDate DATETIME NOT NULL
+);
+
+CREATE TABLE materials (
+    MaterialId INT PRIMARY KEY AUTO_INCREMENT,
+    MaterialName VARCHAR(255) NOT NULL,
+    MaterialDescription TEXT,
+    FilePath VARCHAR(255),
+    EventId INT NOT NULL,
+    FOREIGN KEY (EventId) REFERENCES events(EventId) ON DELETE CASCADE
+);
+
+CREATE TABLE employees_events (
+    ID INT PRIMARY KEY AUTO_INCREMENT,
+    EmployeeId INT NOT NULL,
+    EventId INT NOT NULL,
+    FOREIGN KEY (EmployeeId) REFERENCES employees(EmployeeId) ON DELETE CASCADE,
+    FOREIGN KEY (EventId) REFERENCES events(EventId) ON DELETE CASCADE
+);
+не забыть импортировать working calendar
+
+
+ДЛЯ СОРТИРОВКИ ЭКСЕЛЬ ФАЙЛА
+
+import pandas as pd
+
+import re
+
+  
+
+df = pd.read_excel("pandas_xlsx_to_mysql\dannie.xlsx",skiprows=7)
+
+current_department = None
+
+new_data = []
+
+  
+
+for index,row in df.iterrows():
+
+    if pd.notna(row[0]):
+
+        if '.' in str(row[0]):
+
+            current_department = row[0]
+
+        else:
+
+            if pd.notna(row[1]):
+
+                full_name = row[1]
+
+            else:
+
+                full_name = None
+
+            if full_name:
+
+                new_data.append([full_name,cleaned_department,row[0],row[2],row[3],row[4],row[5]])
+
+new_df = pd.DataFrame(new_data, columns=["ФИО", "Департамент", "Должность","Дата рождения","Телефон рабочий","Кабинет","Корпоративный email"])
+
+with pd.ExcelWriter('output_file2.xlsx') as writer:
+
+    new_df.to_excel(writer,index=False)
+
+ДЛЯ ИМПОРТА ЭТОГО ЭКСЕЛЯ В MYSQL
+
+import pandas as pd
+
+from sqlalchemy import create_engine
+
+engine = create_engine('mysql+mysqlconnector://moodleuser:moodleuserpsw@localhost/wsr2025_db')
+
+df = pd.read_excel('output_file.xlsx')
+
+df.to_sql('employees_data', con=engine, if_exists='replace', index=False)
+
+ДЛЯ ВСТАВКИ ИЗ ТОЙ ТАБЛИЦЫ В ДРУГИЕ ТАБЛИЦЫ РАСПРЕДЕЛИТЬ
+
+сначала вставить департаменты
+
+=ЕСЛИ(ПОИСК("."; A8)>0; A8; "")
+
+import pandas as pd
+import re
+
+data = pd.read_excel("dan2.xlsx",sheet_name = "Лист1",names=["DepartmentId","Name","ParentId","Rank"])
+
+def find_parent(department_name,data):
+    parent_prefix = str(department_name).split('.')[0]
+    for index,row in data.iterrows():
+        if str(row["Name"]).startswith(parent_prefix) and str(row["Name"]) != str(department_name):
+            return row["DepartmentId"]
+    return None
+
+def clean_department(department_name):
+    return re.sub(r'[0-9.]','',department_name).strip()
+
+def get_rank(department_name):
+    return str(department_name).count('.')
+
+data["DepartmentName"] = data["Name"].apply(clean_department)
+data["DepartmentParentId"] = data["Name"].apply(lambda x:find_parent(x,data))
+data["DepartmentRank"] = data["Name"].apply(get_rank)
+
+data = data.drop(columns=["Name","Rank","ParentId"])
+
+data.to_excel("deps.xlsx",index=None)
+
+
+
+-- Вставка данных в таблицу positions с игнорированием дублирующих значений
+INSERT IGNORE INTO positions (Title)
+SELECT DISTINCT Position FROM employees_data;
+
+-- Вставка данных в таблицу employees
+INSERT INTO employees (FullName, DepartmentId, PositionId)
+SELECT 
+    Name, 
+    (SELECT DepartmentId FROM departments WHERE Name = Department LIMIT 1),
+    (SELECT PositionId FROM positions WHERE Title = Position LIMIT 1)
+FROM employees_data;
+
+-- Вставка данных в таблицу employeepersonalinfo
+INSERT INTO employees_personal_info (BirthDate, EmployeeId)
+SELECT 
+    STR_TO_DATE(BirthDate, '%Y-%m-%d') AS BirthDate,
+    employees.EmployeeId
+FROM employees_data
+JOIN employees ON employees.FullName = employees_data.Name;
+
+-- Вставка данных в таблицу employeecontacts
+INSERT INTO employees_contacts (MobilePhone,WorkPhone, Email, OfficeNumber, EmployeeId)
+SELECT 
+    Phone, 
+    Phone,
+    Email, 
+    Cabinet,
+    employees.EmployeeId
+FROM employees_data
+JOIN employees  ON employees.FullName = employees_data.Name;
+
